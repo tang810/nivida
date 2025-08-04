@@ -1,0 +1,12 @@
+ximualpha==0.0.2
+fastapi
+fire
+uvicorn
+langchain==0.0.352
+sentence_transformers
+chromadb
+ADRpy
+matplotlib
+openmdao
+openaerostruct
+python-multipart

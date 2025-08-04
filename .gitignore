@@ -1,0 +1,15 @@
+team.json
+**/*.pyc
+logs
+main.log
+bge-large-zh-v1.5/*
+reports/*
+tools/*
+image/*
+upload/*
+images/*
+image/plot_with_intersections.png
+build/*
+large_files/*
+dist/*
+.env

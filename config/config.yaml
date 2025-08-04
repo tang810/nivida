@@ -1,0 +1,6 @@
+#base_url_1: "http://192.168.6.204:40200/v1"
+#base_url_2: "http://192.168.6.204:23181/v1"
+base_url_1: "http://www.science42.vip:40101/v1"
+base_url_2: "http://www.science42.vip:23181/v1"
+
+api_key: "xxx"
