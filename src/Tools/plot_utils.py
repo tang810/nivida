@@ -1,4 +1,5 @@
 import os
+import io
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -8,11 +9,12 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 # 获取字体文件的绝对路径
-#current_dir = os.path.dirname(os.path.abspath(__file__))
 font_path = os.path.join('fonts', 'SimHei.ttf')
 
 # 添加字体文件
-fm.fontManager.addfont(font_path)
+if os.path.exists(font_path):
+    fm.fontManager.addfont(font_path)
+
 # 设置显示负号的字体
 matplotlib.rcParams['axes.unicode_minus'] = False
 # 如果需要显示中文，可以同时设置中文字体
@@ -24,16 +26,31 @@ label_font_size = 10
 tick_font_size = 10
 
 
-def boxplot(data,output_path):
+def _save_figure_to_bytesio() -> io.BytesIO:
+    """将当前matplotlib图形保存到BytesIO对象"""
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    buf.seek(0)
+    plt.close()  # 关闭当前图形释放内存
+    return buf
 
+
+def boxplot(data, output_buffer: io.BytesIO) -> io.BytesIO:
+    """
+    生成箱线图并保存到BytesIO对象
+    
+    Args:
+        data: pandas DataFrame
+        output_buffer: io.BytesIO对象，用于存储图片数据
+    
+    Returns:
+        io.BytesIO: 包含图片数据的BytesIO对象
+    """
     # 获取所有数值列的名字
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    
     # 创建一个箱形图
     plt.figure(figsize=(9, 6))
-    # 在函数开始时设置主题和字体
-    # plt.rcParams['font.family'] = ['sans-serif']
-    # plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置备选字体
-    # plt.rcParams['axes.unicode_minus'] = False  # 正常显示负号
     
     sns.set_theme(style="whitegrid",
                   font=['sans-serif', 'SimHei'],
@@ -50,12 +67,26 @@ def boxplot(data,output_path):
     plt.grid(True, which='both', axis='both', linestyle='--', alpha=0.5)  # 设置网格线样式和透明度
     plt.tight_layout()
     plt.autoscale(enable=True, axis='both', tight=True)
-    plt.savefig(output_path, dpi=100, bbox_inches='tight')
+    
+    # 保存到BytesIO
+    plt.savefig(output_buffer, format='png', dpi=100, bbox_inches='tight')
+    output_buffer.seek(0)
     plt.close()
+    
+    return output_buffer
 
 
-
-def heatmap_plot(data, output_path):
+def heatmap_plot(data, output_buffer: io.BytesIO) -> io.BytesIO:
+    """
+    生成相关性热力图并保存到BytesIO对象
+    
+    Args:
+        data: pandas DataFrame
+        output_buffer: io.BytesIO对象，用于存储图片数据
+    
+    Returns:
+        io.BytesIO: 包含图片数据的BytesIO对象
+    """
     # 获取所有数值列的名字
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
 
@@ -63,12 +94,7 @@ def heatmap_plot(data, output_path):
     correlation_matrix = data[numeric_columns].corr()
     
     # 设置图形大小
-    # plt.figure(figsize=(9, 6))
     plt.figure(figsize=(9, 9))
-    # 在函数开始时设置主题和字体
-    # plt.rcParams['font.family'] = ['sans-serif']
-    # plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置备选字体
-    # plt.rcParams['axes.unicode_minus'] = False  # 正常显示负号
     
     sns.set_theme(style="whitegrid",
                   font=['sans-serif', 'SimHei'],
@@ -100,14 +126,25 @@ def heatmap_plot(data, output_path):
     # 调整子图参数，确保所有元素都能显示
     plt.tight_layout()
     
-    # 保存图像
-    plt.savefig(output_path, dpi=100, bbox_inches='tight')
-    
-    # 关闭图形
+    # 保存到BytesIO
+    plt.savefig(output_buffer, format='png', dpi=100, bbox_inches='tight')
+    output_buffer.seek(0)
     plt.close()
+    
+    return output_buffer
 
 
-def density_plot(data, output_path):
+def density_plot(data, output_buffer: io.BytesIO) -> io.BytesIO:
+    """
+    生成密度分布图并保存到BytesIO对象
+    
+    Args:
+        data: pandas DataFrame
+        output_buffer: io.BytesIO对象，用于存储图片数据
+    
+    Returns:
+        io.BytesIO: 包含图片数据的BytesIO对象
+    """
     # 选择所有数值类型的列
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
 
@@ -118,7 +155,7 @@ def density_plot(data, output_path):
         'axes.edgecolor': '.8',
         'axes.linewidth': 1.5
     })
-    # 在函数开始时设置主题和字体
+    
     plt.rcParams['font.family'] = ['sans-serif']
     plt.rcParams['font.sans-serif'] = ['SimHei']  # 设置备选字体
     plt.rcParams['axes.unicode_minus'] = False  # 正常显示负号
@@ -136,7 +173,6 @@ def density_plot(data, output_path):
         fig, axes = plt.subplots(
             nrows=nrows, 
             ncols=ncols, 
-            # figsize=(ncols * 4, nrows * 3),
             figsize=(9, nrows * 2),
             dpi=100
         )
@@ -238,20 +274,32 @@ def density_plot(data, output_path):
     # 调整布局
     plt.tight_layout()
     
-    # 保存图像
+    # 保存到BytesIO
     plt.savefig(
-        output_path,
+        output_buffer,
+        format='png',
         dpi=100,
         bbox_inches='tight',
         facecolor='white',
         edgecolor='none'
     )
-    
-    # 关闭图形
+    output_buffer.seek(0)
     plt.close()
+    
+    return output_buffer
 
 
-def violin_plot(data,output_path):
+def violin_plot(data, output_buffer: io.BytesIO) -> io.BytesIO:
+    """
+    生成小提琴图并保存到BytesIO对象
+    
+    Args:
+        data: pandas DataFrame
+        output_buffer: io.BytesIO对象，用于存储图片数据
+    
+    Returns:
+        io.BytesIO: 包含图片数据的BytesIO对象
+    """
     # 选择所有数值类型的列
     numeric_columns = data.select_dtypes(include=['float64', 'int64']).columns.tolist()
 
@@ -280,6 +328,9 @@ def violin_plot(data,output_path):
     # 调整子图间距
     plt.tight_layout()
 
-    # 保存图表
-    plt.savefig(output_path)
+    # 保存到BytesIO
+    plt.savefig(output_buffer, format='png', dpi=100, bbox_inches='tight')
+    output_buffer.seek(0)
     plt.close()
+    
+    return output_buffer

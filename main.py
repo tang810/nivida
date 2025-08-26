@@ -1,108 +1,6 @@
 import os
 import sys
 from pathlib import Path
-
-# ============ PyInstaller 环境检测和工作目录修复 ============
-# 必须在所有其他导入之前执行
-
-print("=" * 50)
-print("Analysis Data 启动中...")
-print("=" * 50)
-
-if getattr(sys, 'frozen', False):
-    # PyInstaller 打包后的可执行文件环境
-    application_path = Path(sys.executable).parent
-    original_cwd = os.getcwd()
-    os.chdir(application_path)
-    print(f"🔧 PyInstaller环境检测")
-    print(f"   可执行文件路径: {sys.executable}")
-    print(f"   切换工作目录: {original_cwd} -> {application_path}")
-    env_file = application_path / '.env'
-    is_frozen = True
-else:
-    # 开发环境
-    application_path = Path(__file__).parent
-    print(f"🛠️  开发环境")
-    print(f"   源码文件路径: {__file__}")
-    print(f"   工作目录: {application_path}")
-    env_file = application_path / '.env'
-    is_frozen = False
-
-print(f"📁 当前工作目录: {os.getcwd()}")
-print(f"📄 .env 文件路径: {env_file}")
-print(f"📄 .env 文件存在: {env_file.exists()}")
-
-# 检查关键配置文件
-config_yaml = Path('config/config2.yaml')
-print(f"📄 config2.yaml 存在: {config_yaml.exists()}")
-if config_yaml.exists():
-    print(f"   config2.yaml 路径: {config_yaml.absolute()}")
-
-# ============ 加载 .env 文件 ============
-# 导入 dotenv（注意：这个导入放在工作目录设置之后）
-try:
-    from dotenv import load_dotenv
-    
-    # 加载 .env 文件
-    if env_file.exists():
-        load_result = load_dotenv(env_file)
-        print(f"✅ .env 文件加载结果: {load_result}")
-        
-        # 显示 .env 文件内容（仅显示非敏感信息）
-        print("📋 .env 文件内容:")
-        try:
-            with open(env_file, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        # 隐藏敏感信息
-                        if any(sensitive in line.upper() for sensitive in ['KEY', 'SECRET', 'PASSWORD', 'TOKEN']):
-                            key = line.split('=')[0] if '=' in line else line
-                            print(f"   {line_num}: {key}=***")
-                        else:
-                            print(f"   {line_num}: {line}")
-        except Exception as e:
-            print(f"   ⚠️  读取 .env 文件时出错: {e}")
-    else:
-        print(f"❌ .env 文件不存在: {env_file}")
-        load_result = False
-        
-except ImportError:
-    print("❌ 无法导入 python-dotenv，请确保已安装该依赖")
-    load_result = False
-
-# ============ 读取环境变量 ============
-PORT = os.getenv('PORT')
-print(f"🌐 从环境变量读取 PORT: {PORT}")
-
-# 处理 PORT 环境变量
-if PORT is None:
-    PORT = "8000"
-    print(f"⚠️  未读取到 PORT 环境变量，使用默认值: {PORT}")
-else:
-    print(f"✅ 成功读取 PORT: {PORT}")
-
-# 确保端口是有效的整数
-try:
-    PORT = int(PORT)
-    print(f"✅ 端口验证成功: {PORT}")
-    if not (1 <= PORT <= 65535):
-        raise ValueError(f"端口号超出有效范围: {PORT}")
-except (ValueError, TypeError) as e:
-    print(f"❌ 端口验证失败: {e}，使用默认端口 8000")
-    PORT = 8000
-
-print("=" * 50)
-print(f"🚀 最终配置:")
-print(f"   运行模式: {'PyInstaller打包' if is_frozen else '开发模式'}")
-print(f"   工作目录: {os.getcwd()}")
-print(f"   服务端口: {PORT}")
-print(f"   .env文件: {'已加载' if load_result else '未加载'}")
-print("=" * 50)
-
-# ============ 继续原有的导入语句 ============
-# 注意：以下导入语句应该保持在原来的位置，只需要删除重复的 import os 等语句
-
 import json
 import uvicorn
 import asyncio
@@ -111,8 +9,6 @@ import traceback
 from alpha.team import Team
 from alpha.schema import Message
 from team_config import *
-# from pathlib import Path  # 已经在上面导入了，删除重复导入
-# from dotenv import load_dotenv  # 已经在上面导入了，删除重复导入
 
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -122,9 +18,8 @@ from fastapi import FastAPI, WebSocket, HTTPException,WebSocketDisconnect, File,
 
 
 # 加载 .env 文件
-# load_dotenv()
-# 读取环境变量
-# PORT = os.getenv('PORT')
+load_dotenv()
+PORT = os.getenv('PORT')
 
 
 UPLOAD_DIR="upload"
@@ -138,7 +33,7 @@ app.add_middleware(
 )
 # 挂载静态文件夹，使其可通过 /static/ 访问
 app.mount("/images", StaticFiles(directory="images"), name="images")
-async def start_round(websocket: WebSocket,team,idea,n_round,user_name,taskid,file_names):
+async def start_round(websocket: WebSocket,team,idea,n_round,user_name,taskid,file_metadata):
     team.run_project(idea)
     await websocket.send_text("【XXX 开始: xxxx】")
     while n_round > 0:
@@ -172,7 +67,7 @@ async def start_round(websocket: WebSocket,team,idea,n_round,user_name,taskid,fi
                     # await websocket.send_text(s)
                     try:
                         # 可能引发异常的代码
-                        full_reply_content= await single_role.rc.todo.run(single_role.rc.history,websocket,user_name,taskid,file_names)
+                        full_reply_content= await single_role.rc.todo.run(single_role.rc.history,websocket,user_name,taskid,file_metadata)
                     except Exception as e:
                         # 使用traceback.print_exc()来打印异常堆栈信息
                         traceback.print_exc()
@@ -213,9 +108,9 @@ async def websocket_endpoint(websocket: WebSocket):
         n_round=int(len(team.env.roles))
         taskid=init_data["taskid"]
         user_name=init_data["user_name"]
-        file_names=list(init_data["file_names"])
+        file_metadata=list(init_data["file_metadata"])
 
-        await start_round(websocket,team,idea,n_round,user_name,taskid,file_names)
+        await start_round(websocket,team,idea,n_round,user_name,taskid,file_metadata)
     except WebSocketDisconnect:
         # 在这里可以添加当客户端断开连接时的处理逻辑
         print("客户端已经主动断开连接！")
