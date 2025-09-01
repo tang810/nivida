@@ -257,23 +257,28 @@ class Input_Analysis(Action):
 
     async def _upload_png_bytes(self, img_bytes: bytes, user: str, taskid: str, name: str) -> str:
         """
-        上传PNG图片字节到MinIO并返回访问URL
+        上传PNG图片字节到MinIO并返回【永久的公开访问URL】
         如果上传或URL生成失败，直接抛出异常
         """
         self._ensure_storage()
+        bucket_name = "science-images" # 定义存储桶名称
         key = f"{user}/{taskid}/{name}"
         
         try:
-            # 上传图片到MinIO
-            await self.storage.aput_object("science-images", key, img_bytes, content_type="image/png")
+            # 1. 上传图片到MinIO
+            await self.storage.aput_object(bucket_name, key, img_bytes, content_type="image/png")
             
-            # 生成预签名URL
-            url = await self._get_pres_url("science-images", key)
+            # 2. 【核心修改】直接拼接永久公开URL，不再调用 _get_pres_url
+            #    URL格式: <公网访问域名>/<存储桶名>/<对象路径>
+            #    self.minio_public 来自您的类变量定义，例如 "https://www.science42.tech"
+            url = f"{self.minio_public.strip('/')}/{bucket_name}/{key}"
+            
             return url
             
         except Exception as e:
-            logger.error(f"Failed to upload or generate URL for {key}: {e}")
-            raise  # 直接抛出异常，让调用方知道失败了
+            # 日志信息可以更具体一些
+            logger.error(f"Failed to upload or generate public URL for {key}: {e}")
+            raise
 
     # ---- 主流程 ----
     async def run(self, instruction: str, *args):
