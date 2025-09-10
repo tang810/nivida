@@ -6,20 +6,21 @@ import uvicorn
 import asyncio
 import traceback
 
+from dotenv import load_dotenv
+load_dotenv(override=True)  # 先加载 .env，确保 MINIO 等变量生效
+
 from alpha.team import Team
 from alpha.schema import Message
 from team_config import *
 
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi import FastAPI, WebSocket, HTTPException,WebSocketDisconnect, File, UploadFile,Form
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
+# 端口从 .env 读取，给个兜底默认
+PORT = int(os.getenv("PORT", "1101"))
 
-# 加载 .env 文件
-load_dotenv()
-PORT = os.getenv('PORT')
 
 
 UPLOAD_DIR="upload"

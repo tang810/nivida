@@ -36,3 +36,11 @@ qianfan==0.4.10.1
 semantic_kernel>=1.17.0
 statsmodels>=0.14.5
 tf-keras
+python-docx
+tiktoken
+loguru
+aiofiles
+GitPython
+gitignore_parser
+colorama
+oss2

@@ -1,78 +1,71 @@
-import re
-import os
-import ast
-import sys
-import json
-import time
-import runpy
-import chardet
-import mimetypes
-import traceback
-import importlib
-import numpy as np
-import pandas as pd
-from typing import ClassVar
-
-from tornado.process import task_id
-
-from alpha.team import Team
-from alpha.roles import Role
-from alpha.logs import logger
-from alpha.schema import Message
-from alpha.actions import Action, UserRequirement
-
-from src.llm_utils import SeLLM
-from src.llm_utils import load_config
-from src.team_config import data_analysis_Input_Analyst
-
-from src.Tools import EDA_Tools
-from src.Tools.date_utils import check_date_column
-from src.Tools.plot_utils import boxplot,heatmap_plot,violin_plot,density_plot
-from src.oss_utils import download_to_file,oss_upload_by_path,get_image_url
-
-from langchain_community.vectorstores import Chroma
-from langchain.embeddings.huggingface import HuggingFaceBgeEmbeddings
-
+# analysis_data/team_config.py —— 单功能：统计信息（stats）
+from typing import Any, Optional, Tuple, List
 from dotenv import load_dotenv
-from utils import read_data_file
+from alpha.roles import Role
+from alpha.actions import Action
+from src.team_stats import run_stats  # 复用你已有的统计函数
 
 load_dotenv()
-server_base = os.getenv('server_base')
-base_path = os.getenv('base_path')
+SERVICE_NAME = "stats"
 
-handler = {"sink": sys.stdout, "level": "ERROR"}
-logger.configure(handlers=[handler])
-init_file_names=None
-df_data_list = None
+def _extract_last_user_text(history: Any) -> str:
+    """从 Alpha 的 history 中尽量取出最近一条用户消息文本。"""
+    if not history:
+        return ""
+    def _get(obj: Any) -> Tuple[str, Optional[str]]:
+        if hasattr(obj, "content"):
+            try:
+                t = getattr(obj, "content")
+                r = getattr(obj, "role", None)
+                if isinstance(t, str):
+                    return t, (r if isinstance(r, str) else None)
+            except Exception:
+                pass
+        if isinstance(obj, dict):
+            for k in ("text", "content", "value", "message"):
+                v = obj.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v, (obj.get("role") if isinstance(obj.get("role"), str) else None)
+        if isinstance(obj, str):
+            return obj, None
+        return "", None
 
+    try:
+        for x in reversed(history):
+            t, r = _get(x)
+            if t.strip() and r and str(r).lower() in {"user", "human"}:
+                return t
+        for x in reversed(history):
+            t, _ = _get(x)
+            if t.strip():
+                return t
+    except Exception:
+        pass
+    return ""
 
-async def start(
-        idea: str = "",
-        investment: float = 0,
-        n_round: int = 1,
-        add_human: bool = True,
-):
-    team = Team()
-    team.hire(
-        [
-            data_analysis_Input_Analyst(),
-        ]
-    )
+class StatsAction(Action):
+    name: str = "执行统计信息"
+    desc: str = "调用 src.team_stats.run_stats(submode='stats') 输出数据概览"
 
-    team.run_project(idea)
-    await team.run(n_round=n_round)
+    async def run(self, history, websocket, user_name, taskid, file_metadata):
+        # 注意：main.py 会把 history 作为第一个参数传进来，这里兼容并自行取出用户问题
+        q = _extract_last_user_text(history) or ""
+        # await websocket.send_text(f"[{SERVICE_NAME}] action start\n")
+        return await run_stats(
+            websocket,
+            user_name,
+            taskid,
+            file_metadata,
+            q,
+            submode="stats",  # 关键：走统计分支
+        )
 
+class data_analysis_Input_Analyst(Role):
+    name: str = "统计信息"
+    profile: str = "单功能服务：统计信息（summary/describe/info 等）"
 
-async def main():
-    while True:
-        userInput = input("\n\n老板，您好：")
-        if userInput == "结束" or userInput == "exit":
-            break
-        else:
-            await start(userInput)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.set_actions([StatsAction()])
 
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+__all__ = ["data_analysis_Input_Analyst", "load_dotenv"]
