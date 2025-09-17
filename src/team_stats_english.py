@@ -7,16 +7,16 @@ from alpha.logs import logger
 from src.llm_utils import SeLLM, load_config
 from src.storage_utils import StorageClient
 from src.Tools.date_utils import check_date_column
-from src.Tools.plot_utils import density_plot  # 若不需要密度图可移除
-from src.Tools import EDA_Tools  # 用于 corr/fft 子模式
+from src.Tools.plot_utils import density_plot  # Can be removed if density plots are not needed
+from src.Tools import EDA_Tools  # Used for corr/fft submodes
 import chardet
 
-# ====== MinIO 域名（与其他模块保持一致）======
+# ====== MinIO domain name (consistent with other modules) ======
 MINIO_PUBLIC = os.getenv("MINIO_PUBLIC_ENDPOINT", "https://www.science42.tech").rstrip("/")
 minio_addr   = os.getenv("MINIO_INTERNAL_ENDPOINT", "http://36.103.203.113:2300").rstrip("/")
 https_vip_addr = MINIO_PUBLIC
 
-# ---------- I/O 与工具通用函数 ----------
+# ---------- Common I/O and utility functions ----------
 def _display_name(item: Any) -> str:
     if isinstance(item, dict):
         return item.get("original_filename") or item.get("filename") or item.get("name") \
@@ -68,21 +68,21 @@ async def _read_df(file_bytes: bytes, filename: str) -> Tuple[int, Any, Dict[str
             data = json.loads(text)
             df = pd.DataFrame(data) if isinstance(data, list) else pd.json_normalize(data)
             return 0, df, {"size": len(file_bytes), "encoding": encoding, "shape": df.shape}
-        return -1, "文件格式不支持或数据格式错误", {"size": len(file_bytes), "encoding": encoding}
+        return -1, "Unsupported file format or invalid data format", {"size": len(file_bytes), "encoding": encoding}
     except Exception as e:
-        return -1, f"文件读取失败: {e}", {"size": len(file_bytes), "error": str(e)}
+        return -1, f"File reading failed: {e}", {"size": len(file_bytes), "error": str(e)}
 
 async def _upload_png_bytes(img_bytes: bytes, user: str, taskid: str, name: str) -> str:
     storage = StorageClient()
     bucket_name = "science-images"
     key = f"{user}/{taskid}/{name}"
     await storage.aput_object(bucket_name, key, img_bytes, content_type="image/png")
-    # 直接返回公网 https 直链
+    # Directly return the public https link
     return f"{MINIO_PUBLIC}/{bucket_name}/{key}"
 
 def _safe_str(obj: Any, max_chars=6000) -> str:
     s = str(obj)
-    return s if len(s) <= max_chars else (s[:max_chars] + "\n... (截断)")
+    return s if len(s) <= max_chars else (s[:max_chars] + "\n... (truncated)")
 
 def _capture_df_info_text(df: pd.DataFrame) -> str:
     buf = io.StringIO(); df.info(buf=buf); return buf.getvalue()
@@ -93,7 +93,7 @@ def _sanitize_llm_selection(sel: str) -> str:
     return re.sub(r'^[\[\(\s\'"]+|[\]\)\s\'"]+$', '', s)
 
 def _auto_pick_date_col(df: pd.DataFrame) -> Optional[str]:
-    # 简版兜底
+    # Simple fallback
     for c in df.columns:
         try:
             s = pd.to_datetime(df[c], errors="coerce")
@@ -103,26 +103,26 @@ def _auto_pick_date_col(df: pd.DataFrame) -> Optional[str]:
             continue
     return None
 
-# ---------- 主入口：统计分析 ----------
+# ---------- Main entry: Statistical analysis ----------
 async def run_stats(websocket, user: str, taskid: str, file_metadata: list, instruction: str, submode: str = "stats"):
-    await websocket.send_text(f"## 统计信息分析结果如下：\n\n")
+    await websocket.send_text(f"## Statistical analysis results:\n\n")
     storage = StorageClient()
 
-    # LLM（用于最后总结；失败不影响主流程）
+    # LLM (used for final summary; failure does not affect main process)
     llm = None
     try:
         cfg = load_config("config/config.yaml")
         llm = SeLLM(base_url=cfg["base_url_1"], api_key=cfg["api_key"])
     except Exception as e:
-        await websocket.send_text(f"> LLM 初始化失败（仍继续输出图表/表格）：{e}\n\n")
+        await websocket.send_text(f"> LLM initialization failed (charts/tables will still be generated): {e}\n\n")
 
     dfs: List[pd.DataFrame] = []
     infos: List[Dict[str, Any]] = []
 
     if not file_metadata:
-        await websocket.send_text("未收到文件。\n"); return ""
+        await websocket.send_text("No files received.\n"); return ""
 
-    # 读取所有文件
+    # Read all files
     for item in file_metadata:
         bucket = _extract_bucket(item)
         key = _extract_key(item, user)
@@ -131,37 +131,37 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
             fname = _display_name(item)
             code, data_or_err, preview = await _read_df(content, fname)
             if code == -1:
-                await websocket.send_text(f"- 文件 {fname} 读取失败：{data_or_err}\n")
+                await websocket.send_text(f"- File {fname} failed to read: {data_or_err}\n")
                 continue
             df: pd.DataFrame = data_or_err  # type: ignore
             dfs.append(df); infos.append({"filename": fname, "bucket": bucket, "key": key})
         except Exception as e:
-            await websocket.send_text(f"- 读取 {bucket}/{key} 失败：{e}\n")
+            await websocket.send_text(f"- Failed to read {bucket}/{key}: {e}\n")
 
     if not dfs:
-        await websocket.send_text("没有可用的数据集。\n"); return ""
+        await websocket.send_text("No available datasets.\n"); return ""
 
-    # 每个文件做统计概览；若 submode 为 corr/fft，则额外调用对应 EDA_Tools
+    # Statistical overview for each file; if submode is corr/fft, call corresponding EDA_Tools
     for i, df in enumerate(dfs):
         fname = infos[i]["filename"]
-        await websocket.send_text(f"### 数据集：{fname}\n\n")
+        await websocket.send_text(f"### Dataset: {fname}\n\n")
         await websocket.send_text(f"```\n{_safe_str(df.head())}\n```\n\n")
 
-        # ====== 基本统计表格化解读（由 LLM 生成）======
+        # ====== Basic statistical tabular interpretation (generated by LLM) ======
         info_text = _capture_df_info_text(df)
         prompt = f"""
-你是统计分析专家。请基于下列数据概览给出简洁的中文表格化分析结论（不要输出代码）：
+You are a statistical analysis expert. Based on the following dataset overview, provide a concise tabular analysis in English (do not output code):
 
-- 维度：{df.shape}
-- 前五行：
+- Shape: {df.shape}
+- First five rows:
 {_safe_str(df.head())}
-- 统计描述：
+- Statistical description:
 {_safe_str(df.describe(include='all'))}
-- 结构信息：
+- Structural info:
 {_safe_str(info_text)}
 
-用户问题：{instruction}
-只输出表格化要点（如变量类型、缺失、分布、可疑值等），简洁有层次。要有序号，不要大段大段文字堆在一起。
+User question: {instruction}
+Only output tabular key points (such as variable types, missing values, distributions, suspicious values, etc.), concise and well-structured.
 """.strip()
         if llm:
             msgs = [llm._default_system_msg(), llm._user_msg(prompt)]
@@ -170,9 +170,9 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                 await websocket.send_text(c.choices[0].delta.content or "" if c.choices else "")
             await websocket.send_text("\n\n")
         else:
-            await websocket.send_text("> LLM 不可用，跳过概览表格化解读。\n\n")
+            await websocket.send_text("> LLM unavailable, skipping tabular interpretation.\n\n")
 
-        # ====== 可选：corr/fft 子模式 ======
+        # ====== Optional: corr/fft submode ======
         try:
             nowstr = time.strftime("%Y%m%d%H%M%S")
             if submode == "corr":
@@ -183,9 +183,9 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                         url = await _upload_png_bytes(buf.getvalue(), user, taskid, f"acf_pacf_{os.path.splitext(fname)[0]}_{k}_{nowstr}.png")
                         if url.startswith(minio_addr):
                             url = url.replace(minio_addr, https_vip_addr, 1)
-                        await websocket.send_text(f"![相关图#{k+1}]({url})\n\n")
+                        await websocket.send_text(f"![Correlation plot #{k+1}]({url})\n\n")
                 if summary:
-                    await websocket.send_text(f"**相关性结论**：{summary}\n\n")
+                    await websocket.send_text(f"**Correlation conclusion**: {summary}\n\n")
 
             if submode == "fft":
                 img_bufs, summary = EDA_Tools.fft_periodic(df, None)
@@ -195,16 +195,16 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                         url = await _upload_png_bytes(buf.getvalue(), user, taskid, f"fft_{os.path.splitext(fname)[0]}_{k}_{nowstr}.png")
                         if url.startswith(minio_addr):
                             url = url.replace(minio_addr, https_vip_addr, 1)
-                        await websocket.send_text(f"![频谱图#{k+1}]({url})\n\n")
+                        await websocket.send_text(f"![Spectrum plot #{k+1}]({url})\n\n")
                 if summary:
-                    await websocket.send_text(f"**频域结论**：{summary}\n\n")
+                    await websocket.send_text(f"**Frequency domain conclusion**: {summary}\n\n")
         except Exception as e:
-            await websocket.send_text(f"子模式({submode}) 生成图失败：{e}\n\n")
+            await websocket.send_text(f"Submode({submode}) failed to generate plots: {e}\n\n")
 
-        # ====== 收尾：LLM 综合总结（精简、不复读表格）======
+        # ====== Final step: LLM overall summary (concise, no repetition of tables) ======
         if llm:
             try:
-                # 为总结准备一个简短“要点包”
+                # Prepare a brief "key points package" for summary
                 na_rates = (df.isna().mean()*100.0).sort_values(ascending=False)
                 top_missing = na_rates.head(5).round(2).to_dict()
                 col_types = df.dtypes.astype(str).to_dict()
@@ -219,22 +219,22 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                 }
 
                 sys_prompt = (
-                    "你是资深数据分析师。请根据给定的统计信息，输出**不超过500字**的中文精简总结；"
-                    "不要使用表情符号；不要简单复读前面的表格或字面字段；"
-                    "按“总体概况/质量与风险/建议”的结构，简短有力。“总体概况/质量与风险/建议”前面有序号，首行缩进。"
+                    "You are a senior data analyst. Based on the given statistics, output a concise summary in English within **500 words**; "
+                    "Do not use emojis; do not simply repeat previous tables or literal fields; "
+                    "Structure the output as 'Overall overview / Data quality & risks / Suggestions', short and powerful."
                 )
-                user_prompt = f"""用户问题：{instruction}
-文件：{fname}
-要点：{json.dumps(summary_payload, ensure_ascii=False)}
-（若存在“相关性/频域结论”，也请顺带融合到结尾建议中。）"""
+                user_prompt = f"""User question: {instruction}
+File: {fname}
+Key points: {json.dumps(summary_payload, ensure_ascii=False)}
+(If there are 'Correlation/Frequency domain conclusions', please integrate them into the final suggestions as well.)"""
 
                 msgs = [
                     llm._default_system_msg(),
                     llm._user_msg(sys_prompt + "\n\n" + user_prompt),
                 ]
 
-                await websocket.send_text("### 统计信息解读如下：\n\n")
-                char_limit = 1000  # 与 trend 保持同级别
+                await websocket.send_text("### Statistical interpretation:\n\n")
+                char_limit = 1000  # keep same as trend
                 produced = ""
                 stream = await llm.acompletion_text(msgs, temperature=0.6, timeout=60)
                 async for chunk in stream:
@@ -249,6 +249,6 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                     await websocket.send_text(out)
                 await websocket.send_text("\n\n")
             except Exception as e:
-                await websocket.send_text(f"> 生成文字总结失败：{e}\n\n")
+                await websocket.send_text(f"> Failed to generate text summary: {e}\n\n")
 
     return ""

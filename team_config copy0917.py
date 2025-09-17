@@ -8,22 +8,17 @@ from src.team_stats import run_stats  # 复用你已有的统计函数
 load_dotenv()
 SERVICE_NAME = "stats"
 
-# —— 模糊触发词：一般性的“看看/分析”请求，默认走轻量
+# —— 新增：把“分析一下/看看数据”等模糊请求当作统计的默认触发词
 GENERIC_TRIGGERS = [
     "分析一下", "分析下", "帮我分析", "看看数据", "看下数据", "看看情况",
     "看一下", "给我看看", "简单看下", "解读一下",
     "analysis", "analyze", "overview", "summary",
 ]
 
-# —— 明确要求“全量/完整”的触发词：只有命中这些才走 full
-FULL_TRIGGERS = ("全量", "完整", "全面", "全部", "full", "plan=full")
-
-
 def _extract_last_user_text(history: Any) -> str:
     """从 Alpha 的 history 中尽量取出最近一条用户消息文本。"""
     if not history:
         return ""
-
     def _get(obj: Any) -> Tuple[str, Optional[str]]:
         if hasattr(obj, "content"):
             try:
@@ -55,54 +50,36 @@ def _extract_last_user_text(history: Any) -> str:
         pass
     return ""
 
-
 def _is_generic_analysis(q: str) -> bool:
-    """弱意图：无“统计/趋势/异常”等明确词，但看起来是泛分析请求。空文本不算泛分析。"""
+    """弱意图：无“统计/趋势/异常”等明确词，但看起来是泛分析请求。"""
     q = (q or "").strip()
     if not q:
-        return False  # 关键：避免空文本误触 full
+        return True
     ql = q.lower()
     return any(tok in q or tok in ql for tok in GENERIC_TRIGGERS)
-
-
-def _wants_full(q: str) -> bool:
-    """只有明确出现全量/完整/全面/full 等词时，才认为需要 full。"""
-    q = (q or "").strip()
-    if not q:
-        return False
-    ql = q.lower()
-    return any(t in q or t in ql for t in FULL_TRIGGERS)
-
 
 class StatsAction(Action):
     name: str = "执行统计信息"
     desc: str = "调用 src.team_stats.run_stats(submode='stats') 输出数据概览（默认兜底）"
 
     async def run(self, history, websocket, user_name, taskid, file_metadata):
-        # 取用户问题文本
+        # 注意：main.py 会把 history 作为第一个参数传进来，这里兼容并自行取出用户问题
         q = _extract_last_user_text(history) or ""
+        # 泛分析→给统计模块一个“更全面”的计划；明确需求→走轻量
+        plan = "full" if _is_generic_analysis(q) else "quick"
 
-        # 计划选择：仅在明确要求 full 时使用 full；否则统一 quick（轻量）
-        if _wants_full(q):
-            plan = "full"
-        else:
-            # 泛分析或其他场景，默认轻量；你可以按需扩展 quick 的实现
-            plan = "quick"
+        # 可选：把路由决定告诉前端（便于调试）
+        await websocket.send_text(f"[{SERVICE_NAME}] plan={plan}")
 
-        # 不再把 plan 回显到前端，避免出现 [stats] plan=full 的文本
-        # 如需调试，可启用： await websocket.send_text(f"[{SERVICE_NAME}] plan={plan}")
-
-        # run_stats 当前签名：run_stats(websocket, user, taskid, file_metadata, instruction, submode)
         return await run_stats(
             websocket=websocket,
-            user=user_name,               # 参数名对齐 team_stats.run_stats
+            user_name=user_name,
             taskid=taskid,
             file_metadata=file_metadata,
-            instruction=q,                # 传入用户问题
-            submode="stats",              # 统计子模块
-            # 如果你后续想让 run_stats 按 plan 调整力度，可以在 run_stats 里新增 plan 参数并透传
+            q=q,
+            submode="stats",   # 走统计分支
+            plan=plan,         # 关键：把 plan 传给统计实现
         )
-
 
 class data_analysis_Input_Analyst(Role):
     name: str = "统计信息"
@@ -111,6 +88,5 @@ class data_analysis_Input_Analyst(Role):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_actions([StatsAction()])
-
 
 __all__ = ["data_analysis_Input_Analyst", "load_dotenv"]
