@@ -57,7 +57,7 @@ class SeLLM(BaseLLM):
         return kwargs
 
     
-    async def _achat_completion_stream(self, messages: list[dict],max_tokens,model,temperature, timeout=3) -> str:
+    async def _achat_completion_stream(self, messages: list[dict],max_tokens,model,temperature, timeout=10) -> str:
         
         response: AsyncStream[ChatCompletionChunk] = await self.aclient.chat.completions.create(
             **self._cons_kwargs(messages,model,max_tokens,temperature, timeout=timeout), stream=True
@@ -65,7 +65,7 @@ class SeLLM(BaseLLM):
         return response
 
    
-    def _cons_kwargs(self, messages: list[dict],model,max_tokens,temperature,timeout=3, **extra_kwargs) -> dict:
+    def _cons_kwargs(self, messages: list[dict],model,max_tokens,temperature,timeout=10, **extra_kwargs) -> dict:
         kwargs = {
             "messages": messages,
             "max_tokens": max_tokens,
@@ -77,16 +77,16 @@ class SeLLM(BaseLLM):
             kwargs.update(extra_kwargs)
         return kwargs
 
-    async def _achat_completion(self, messages: list[dict],max_tokens,model,temperature,  timeout=3) -> ChatCompletion:
+    async def _achat_completion(self, messages: list[dict],max_tokens,model,temperature,  timeout=10) -> ChatCompletion:
         kwargs = self._cons_kwargs(messages, max_tokens=max_tokens,model=model,temperature=temperature, timeout=timeout)
         rsp: ChatCompletion = await self.aclient.chat.completions.create(**kwargs)
         # self._update_costs(rsp.usage)
         return rsp
 
-    async def acompletion(self, messages: list[dict], timeout=3) -> ChatCompletion:
+    async def acompletion(self, messages: list[dict], timeout=10) -> ChatCompletion:
         return await self._achat_completion(messages, timeout=timeout)
 
-    async def acompletion_text(self, messages: list[dict],max_tokens=8196,model="SE_V0.0",temperature=0.7,stream=True, timeout=3) -> str:
+    async def acompletion_text(self, messages: list[dict],max_tokens=8196,model="SE_V0.0",temperature=0.7,stream=True, timeout=10) -> str:
         """when streaming, print each token in place."""
         if stream:
             rsp =  await self._achat_completion_stream(messages,max_tokens,model,temperature, timeout=timeout)
@@ -110,7 +110,7 @@ async def main():
     prompt = ""
     message = [llm._default_system_msg()]
     message.append(llm._user_msg(prompt))
-    response = await llm.acompletion_text(message,temperature=0.7,model="SE_V0.0",timeout=3)
+    response = await llm.acompletion_text(message,temperature=0.7,model="SE_V0.0",timeout=10)
 
     collected_messages = []
     async for chunk in response:

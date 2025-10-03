@@ -14,7 +14,40 @@ import chardet
 # ====== MinIO 域名（与其他模块保持一致）======
 MINIO_PUBLIC = os.getenv("MINIO_PUBLIC_ENDPOINT", "https://www.science42.tech").rstrip("/")
 minio_addr   = os.getenv("MINIO_INTERNAL_ENDPOINT", "http://36.103.203.113:2300").rstrip("/")
-https_vip_addr = MINIO_PUBLIC
+https_vip_addr = MINIO_PUBLIC  # 统一映射到公网域名
+
+# ---------------- 新增：文件名安全化 & URL 分段编码 ----------------
+from urllib.parse import quote
+
+_SAFE = "-_.()~"  # URL 段内允许不编码的字符
+def _safe_stem(name: str) -> str:
+    """
+    规范化文件名主体：去首尾空白、将空白转下划线，仅保留安全字符。
+    例如 'avocado- 001' -> 'avocado-001'
+    """
+    s = (name or "").strip()
+    s = re.sub(r"\s+", "_", s)              # 连续空白 -> 下划线
+    s = re.sub(r"[^A-Za-z0-9._-]+", "", s)  # 仅保留字母数字.-_
+    return s
+
+def _quote_url_segments(*parts: str) -> str:
+    """对每个路径段分别 quote，再用 '/' 拼接；不要对完整 URL 一次性 quote。"""
+    return "/".join(quote(p, safe=_SAFE) for p in parts)
+
+def _force_https_public(url: str) -> str:
+    """
+    把任意传入 URL 的 scheme+host 替换为 https_vip_addr，保留路径。
+    """
+    base = str(https_vip_addr or "").strip().rstrip("/")
+    if not base:
+        return url
+    try:
+        i = url.find("://")
+        j = url.find("/", i + 3) if i != -1 else -1
+        path = url[j:] if j != -1 else ""
+        return f"{base}{path}"
+    except Exception:
+        return f"{base}"
 
 # ---------- I/O 与工具通用函数 ----------
 def _display_name(item: Any) -> str:
@@ -73,12 +106,16 @@ async def _read_df(file_bytes: bytes, filename: str) -> Tuple[int, Any, Dict[str
         return -1, f"文件读取失败: {e}", {"size": len(file_bytes), "error": str(e)}
 
 async def _upload_png_bytes(img_bytes: bytes, user: str, taskid: str, name: str) -> str:
+    """
+    上传图片并返回“分段编码后的”公网 URL，避免空格/中文导致链接无效。
+    """
     storage = StorageClient()
     bucket_name = "science-images"
     key = f"{user}/{taskid}/{name}"
     await storage.aput_object(bucket_name, key, img_bytes, content_type="image/png")
-    # 直接返回公网 https 直链
-    return f"{MINIO_PUBLIC}/{bucket_name}/{key}"
+    # 先构造编码后的直链，再强制映射到 https 公网域名
+    quoted = f"{MINIO_PUBLIC}/{bucket_name}/" + _quote_url_segments(user, taskid, name)
+    return _force_https_public(quoted)
 
 def _safe_str(obj: Any, max_chars=6000) -> str:
     s = str(obj)
@@ -161,7 +198,7 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
 {_safe_str(info_text)}
 
 用户问题：{instruction}
-只输出表格化要点（如变量类型、缺失、分布、可疑值等），简洁有层次。要有序号，不要大段大段文字堆在一起。
+只输出表格化要点（如变量类型、缺失、分布、可疑值等），简洁有层次。要有序号, 精准解读。
 """.strip()
         if llm:
             msgs = [llm._default_system_msg(), llm._user_msg(prompt)]
@@ -172,17 +209,21 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
         else:
             await websocket.send_text("> LLM 不可用，跳过概览表格化解读。\n\n")
 
-        # ====== 可选：corr/fft 子模式 ======
+        # ====== 可选：corr/fft 子模式（修复了文件名和 URL 编码）======
         try:
             nowstr = time.strftime("%Y%m%d%H%M%S")
+            stem_safe = _safe_stem(os.path.splitext(fname)[0])  # ← 统一安全化文件名主体
+
             if submode == "corr":
                 img_bufs, summary = EDA_Tools.acf_and_pacf(df, None)
                 if img_bufs:
                     for k, buf in enumerate(img_bufs):
                         buf.seek(0)
-                        url = await _upload_png_bytes(buf.getvalue(), user, taskid, f"acf_pacf_{os.path.splitext(fname)[0]}_{k}_{nowstr}.png")
-                        if url.startswith(minio_addr):
-                            url = url.replace(minio_addr, https_vip_addr, 1)
+                        url = await _upload_png_bytes(
+                            buf.getvalue(), user, taskid,
+                            f"acf_pacf_{stem_safe}_{k}_{nowstr}.png"  # ← 用安全名
+                        )
+                        url = _force_https_public(url)  # 双保险（与其它模块一致）
                         await websocket.send_text(f"![相关图#{k+1}]({url})\n\n")
                 if summary:
                     await websocket.send_text(f"**相关性结论**：{summary}\n\n")
@@ -192,9 +233,11 @@ async def run_stats(websocket, user: str, taskid: str, file_metadata: list, inst
                 if img_bufs:
                     for k, buf in enumerate(img_bufs):
                         buf.seek(0)
-                        url = await _upload_png_bytes(buf.getvalue(), user, taskid, f"fft_{os.path.splitext(fname)[0]}_{k}_{nowstr}.png")
-                        if url.startswith(minio_addr):
-                            url = url.replace(minio_addr, https_vip_addr, 1)
+                        url = await _upload_png_bytes(
+                            buf.getvalue(), user, taskid,
+                            f"fft_{stem_safe}_{k}_{nowstr}.png"  # ← 用安全名
+                        )
+                        url = _force_https_public(url)
                         await websocket.send_text(f"![频谱图#{k+1}]({url})\n\n")
                 if summary:
                     await websocket.send_text(f"**频域结论**：{summary}\n\n")
