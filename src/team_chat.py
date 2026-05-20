@@ -13,3 +13,4 @@ async def run_chat(websocket, user: str, taskid: str, instruction: str):
         await websocket.send_text(c.choices[0].delta.content or "" if c.choices else "")
     await websocket.send_text("\n")
     return ""
+#hdue
