@@ -17,6 +17,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from data_processing_module import router as data_processing_router
 
 # 端口从 .env 读取，给个兜底默认
 PORT = int(os.getenv("PORT", "1101"))
@@ -32,7 +33,9 @@ app.add_middleware(
     allow_methods=["*"],  # 允许所有HTTP方法
     allow_headers=["*"],  # 允许所有头部
 )
+app.include_router(data_processing_router)
 # 挂载静态文件夹，使其可通过 /static/ 访问
+os.makedirs("images", exist_ok=True)
 app.mount("/images", StaticFiles(directory="images"), name="images")
 async def start_round(websocket: WebSocket,team,idea,n_round,user_name,taskid,file_metadata):
     team.run_project(idea)
