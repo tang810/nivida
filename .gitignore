@@ -12,4 +12,5 @@ image/plot_with_intersections.png
 build/*
 large_files/*
 dist/*
+output/*
 .env

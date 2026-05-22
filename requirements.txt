@@ -44,3 +44,7 @@ GitPython
 gitignore_parser
 colorama
 oss2
+sympy>=1.12
+trimesh>=4.0
+scikit-image>=0.22
+pyvista>=0.43
